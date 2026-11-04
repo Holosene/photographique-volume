@@ -5168,7 +5168,7 @@
       cursorX = e.clientX;
       cursorY = e.clientY;
       if (!cursorRafId) {
-        if (!cursorInWindow || !customCursor.classList.contains('visible')) { cursorInWindow = true; setCursorVisible(); }
+        if (!cursorInWindow) { cursorInWindow = true; setCursorVisible(); }
         cursorRafId = requestAnimationFrame(() => {
           cursorRafId = 0;
           if (!cursorAllowed) {

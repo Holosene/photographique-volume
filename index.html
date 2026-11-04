@@ -806,6 +806,17 @@
       align-items: center;
       justify-content: center;
     }
+    #click-gate { flex-direction: column; }
+    .click-gate-hint {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+      color: rgba(255,255,255,0.7);
+      margin-top: -50px; pointer-events: none; user-select: none;
+      opacity: 0;
+      animation: clickGateBlink 1.6s ease-in-out 1.3s infinite;
+    }
+    @keyframes clickGateBlink { 0%,100% { opacity: 0; } 50% { opacity: 1; } }
+    #click-gate.dismissing .click-gate-hint { animation: none; opacity: 0; transition: opacity 0.4s; }
     #click-gate .click-gate-text {
       cursor: pointer !important;
     }
@@ -1145,6 +1156,7 @@
   <!-- Page d'entrée click-gate (user gesture pour AudioContext) -->
   <div id="click-gate">
     <div class="click-gate-text">ENTRER</div>
+    <div class="click-gate-hint">cliquer pour entrer</div>
   </div>
 
   <div id="landing-page">
@@ -1728,6 +1740,7 @@
 
     function registerUserActivity() {
       lastUserActivity = performance.now();
+      if (window._audioIdle) { window._audioIdle = false; AudioEngine.setActivity(1); }
       if (inactivityReturning) {
         inactivityReturning = false;
       }
@@ -1739,6 +1752,14 @@
         }
       }
     }
+
+    // Son : après 2,5 s sans mouvement, le volume descend lentement
+    setInterval(() => {
+      if (!window._audioIdle && performance.now() - lastUserActivity > 2500 && typeof AudioEngine !== 'undefined') {
+        window._audioIdle = true;
+        AudioEngine.setActivity(0.08);
+      }
+    }, 500);
 
     // Variables pour transition fluide entre images (basée sur position, pas temps)
     let isTransitioning = false;
@@ -1860,10 +1881,11 @@
     // Saturation des couleurs
     function saturateColor(r, g, b, intensity) {
       const avg = (r + g + b) / 3;
+      intensity *= 1.5; // vivacité renforcée
       r = avg + (r - avg) * intensity;
       g = avg + (g - avg) * intensity;
       b = avg + (b - avg) * intensity;
-      return { r: Math.min(r, 1), g: Math.min(g, 1), b: Math.min(b, 1) };
+      return { r: Math.max(0, Math.min(r, 1)), g: Math.max(0, Math.min(g, 1)), b: Math.max(0, Math.min(b, 1)) };
     }
 
     // Version des images (incrémenter ce nombre quand vous changez les images)
@@ -2010,6 +2032,19 @@
     // Colorise un pixel gris avec le gradient Floc'h de l'image
     // luminance (0→1) détermine la position dans le gradient ET module la brillance
     // Résultat: les nuances de gris sont préservées mais teintées
+    // Vivacité : saturation + luminosité renforcées sur chaque couleur
+    (function boostGradients() {
+      const SAT = 1.6, LIGHT = 1.25;
+      FLOCH_GRADIENTS.forEach(g => g.forEach(stop => {
+        let [r, gg, b] = stop.color;
+        const avg = (r + gg + b) / 3;
+        r = (avg + (r - avg) * SAT) * LIGHT;
+        gg = (avg + (gg - avg) * SAT) * LIGHT;
+        b = (avg + (b - avg) * SAT) * LIGHT;
+        stop.color = [Math.min(1, Math.max(0, r)), Math.min(1, Math.max(0, gg)), Math.min(1, Math.max(0, b))];
+      }));
+    })();
+
     function colorFromLuminance(luminance, imageIndex) {
       // imageIndex est 1-based (1 à 7), FLOCH_GRADIENTS est 0-based
       const gradientIdx = Math.max(0, Math.min(FLOCH_GRADIENTS.length - 1, imageIndex - 1));
@@ -2279,9 +2314,11 @@
                 posY += jitterY;
 
                 // Ajouter un offset aléatoire supplémentaire basé sur le paramètre randomness
-                if (particleParams.randomness > 0) {
-                  const randomOffsetX = (seededRandom(x, y, 1) - 0.5) * particleParams.randomness * (step / scaleFactor);
-                  const randomOffsetY = (seededRandom(x, y, 2) - 0.5) * particleParams.randomness * (step / scaleFactor);
+                {
+                  // Jitter fort (≈1,6 cellule) pour brouiller la trame régulière des plateformes
+                  const jitter = Math.max(1.6, particleParams.randomness);
+                  const randomOffsetX = (seededRandom(x, y, 1) - 0.5) * jitter * (step / scaleFactor);
+                  const randomOffsetY = (seededRandom(x, y, 2) - 0.5) * jitter * (step / scaleFactor);
                   posX += randomOffsetX;
                   posY += randomOffsetY;
                 }
@@ -2811,6 +2848,9 @@
     const AudioEngine = (() => {
       let ctx = null;
       let master = null;
+      let idleGain = null;
+      let _idleLevel = 1;
+      let _varT = 0;
       let isActive = false;
       let isInitialized = false;
       let currentTheme = 0; // 0=off, 1-5=thèmes
@@ -3073,7 +3113,11 @@
         compressor.connect(convolver);
         convolver.connect(reverbWet);
         reverbWet.connect(master);
-        master.connect(ctx.destination);
+        // Gain d'activité : baisse lentement à l'arrêt, remonte au mouvement
+        idleGain = ctx.createGain();
+        idleGain.gain.value = 1;
+        master.connect(idleGain);
+        idleGain.connect(ctx.destination);
 
         isInitialized = true;
       }
@@ -3403,10 +3447,30 @@
       }
 
       // ─── UPDATE PAR FRAME (appelé dans animate()) ───
+      // Niveau d'activité 0..1 (1 = mouvement récent). Fondu lent, jamais coupé net.
+      function setActivity(level) {
+        if (!idleGain || !ctx) return;
+        const now = ctx.currentTime;
+        const up = level > _idleLevel;
+        _idleLevel = level;
+        idleGain.gain.cancelScheduledValues(now);
+        idleGain.gain.setTargetAtTime(level, now, up ? 0.6 : 6.0);
+      }
+
       function update(params) {
         if (!isActive || !layers.drone) return;
 
         const now = ctx.currentTime;
+        // Légères variations organiques : dérive lente et aléatoire du désaccord
+        if (now - _varT > 0.5) {
+          _varT = now;
+          layers.drone.oscs.forEach(o => {
+            if (o._drift === undefined) { o._drift = 0; o._baseDet = o.osc.detune.value; o._baseGain = o.gain.gain.value; }
+            o._drift = Math.max(-18, Math.min(18, o._drift + (Math.random() - 0.5) * 4));
+            o.osc.detune.setTargetAtTime(o._baseDet + o._drift, now, 2.5);
+            o.gain.gain.setTargetAtTime(o._baseGain * (0.85 + Math.random() * 0.3), now, 3);
+          });
+        }
         const T = THEMES[currentTheme];
         if (!T) return;
 
@@ -3730,6 +3794,7 @@
         mute,
         unmute,
         update,
+        setActivity,
         ensureContextRunning,
         playDismissWhoosh,
         _onVisibilityChange,
@@ -3929,11 +3994,7 @@
           toggleInfoOverlay(true);
           infoHasReachedZero = true;
           // Couper le son en fondu
-          if (AudioEngine.isActive && !audioMuted) {
-            AudioEngine.mute();
-            // Marquer comme muté pour que le retour d'activité le réactive
-            window._inactivityMuted = true;
-          }
+
         }
       }
 
@@ -3961,8 +4022,6 @@
           const fadeProgress = Math.min(1, elapsed / INFO_FADE_DURATION);
           const remainingOpacity = 1 - fadeProgress;
           infoOverlay.style.opacity = remainingOpacity;
-          // Cursor follows same fade
-          customCursor.style.opacity = remainingOpacity;
           if (fadeProgress >= 1) {
             infoOverlay.classList.remove('visible');
             infoOverlay.style.opacity = '';
@@ -4291,7 +4350,7 @@
       });
 
       // Drag look-around: interpolation fluide du point de regard caméra
-      if (dragActive) {
+      if (dragActive || hoverLook) {
         // Mouvement actif : lerp vers la target
         dragCurrentX += (dragTargetX - dragCurrentX) * DRAG_LERP;
         dragCurrentY += (dragTargetY - dragCurrentY) * DRAG_LERP;
@@ -4747,13 +4806,29 @@
       registerUserActivity();
       if (clickGateActive || landingActive || introActive) return;
       if (e.button !== 0) return;
-      if (e.target.closest('#settings-panel, #ux-states-panel, #scroll-config-panel, #debug-panel, #info-overlay, .admin-panel')) return;
-      dragActive = true;
+      if (e.target.closest('#settings-panel, #ux-states-panel, #scroll-config-panel, #debug-panel, #info-overlay, .admin-panel, button, a')) return;
+      // Simple clic (sans glisser) → afficher l'interface texte
+      _clickStartX = e.clientX; _clickStartY = e.clientY; _clickPending = true;
       dragPrevX = e.clientX;
       dragPrevY = e.clientY;
       dragVelocityX = 0;
       dragVelocityY = 0;
     });
+
+    // Le regard suit simplement la position du curseur (sans clic) quand l'interface texte est cachée
+    var hoverLook = false;
+    window.addEventListener('mousemove', (e) => {
+      registerUserActivity();
+      if (clickGateActive || landingActive || introActive) return;
+      if (infoOverlay.classList.contains('visible')) { hoverLook = false; return; }
+      hoverLook = true;
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = (e.clientY / window.innerHeight) * 2 - 1;
+      dragTargetX = nx * DRAG_MAX_OFFSET;
+      dragTargetY = -ny * DRAG_MAX_OFFSET;
+      dragVelocityX = 0; dragVelocityY = 0;
+    });
+    document.addEventListener('mouseleave', () => { hoverLook = false; });
 
     window.addEventListener('mousemove', (e) => {
       if (!dragActive) return;
@@ -4770,7 +4845,14 @@
       dragVelocityY = -dy * DRAG_SENSITIVITY;
     });
 
-    window.addEventListener('mouseup', () => {
+    var _clickStartX = 0, _clickStartY = 0, _clickPending = false;
+    window.addEventListener('mouseup', (e) => {
+      if (_clickPending) {
+        _clickPending = false;
+        if (Math.hypot(e.clientX - _clickStartX, e.clientY - _clickStartY) < 8 && !infoOverlay.classList.contains('visible')) {
+          toggleInfoOverlay(true);
+        }
+      }
       if (dragActive) {
         dragActive = false;
         // Pas de reset immédiat → l'inertie puis le retour se font dans animate()
@@ -4925,16 +5007,16 @@
 
     // DOUBLE-TAP mobile → toggle info overlay (remplace alt/clic droit)
     if (isMobile) {
-      let lastTapTime = 0;
+      let tapX = 0, tapY = 0, tapT = 0;
+      window.addEventListener('touchstart', (e) => {
+        const t = e.changedTouches[0]; tapX = t.clientX; tapY = t.clientY; tapT = performance.now();
+      }, { passive: true });
       window.addEventListener('touchend', (e) => {
-        if (landingActive || introActive) return;
-        const now = performance.now();
-        if (now - lastTapTime < 350) {
-          e.preventDefault();
-          toggleInfoOverlay();
-          lastTapTime = 0;
-        } else {
-          lastTapTime = now;
+        if (landingActive || introActive || clickGateActive) return;
+        if (e.target.closest('button, a, #info-overlay')) return;
+        const t = e.changedTouches[0];
+        if (Math.hypot(t.clientX - tapX, t.clientY - tapY) < 10 && performance.now() - tapT < 300) {
+          toggleInfoOverlay(true);
         }
       });
     }
@@ -5047,9 +5129,11 @@
       customCursor.style.transform = 'translate3d(' + cursorX + 'px,' + cursorY + 'px,0) translate(-50%,-50%)';
     }
 
-    function setCursorVisible(on) {
-      customCursor.classList.toggle('visible', on);
-      if (!on) customCursor.style.opacity = '';
+    // Le curseur ne doit jamais disparaître (sauf hors de la fenêtre)
+    let cursorInWindow = true;
+    function setCursorVisible() {
+      customCursor.style.opacity = '';
+      customCursor.classList.toggle('visible', cursorInWindow);
     }
 
     // Couleur du curseur basée sur la couleur dominante (surface) du gradient Floc'h de l'image
@@ -5081,6 +5165,7 @@
       cursorX = e.clientX;
       cursorY = e.clientY;
       if (!cursorRafId) {
+        if (!cursorInWindow || !customCursor.classList.contains('visible')) { cursorInWindow = true; setCursorVisible(); }
         cursorRafId = requestAnimationFrame(() => {
           cursorRafId = 0;
           if (!cursorAllowed) {
@@ -5092,9 +5177,10 @@
       }
     }, { passive: true });
 
-    window.addEventListener('mouseleave', () => setCursorVisible(false));
-    window.addEventListener('blur', () => setCursorVisible(false));
-    document.addEventListener('visibilitychange', () => { if (document.hidden) setCursorVisible(false); });
+    document.addEventListener('mouseleave', () => { cursorInWindow = false; setCursorVisible(); });
+    document.addEventListener('mouseenter', () => { cursorInWindow = true; setCursorVisible(); });
+    window.addEventListener('focus', () => { cursorInWindow = true; setCursorVisible(); });
+    setCursorVisible();
 
     // === SCREENSHOT UTILITY ===
     function autoDownload(blob, filename) {

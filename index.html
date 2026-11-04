@@ -5136,7 +5136,7 @@
     function setCursorVisible() {
       customCursor.style.opacity = '';
       const inScene = !clickGateActive && !landingActive && !introActive;
-      customCursor.classList.toggle('visible', cursorInWindow && inScene);
+      customCursor.classList.toggle('visible', cursorInWindow && inScene && infoOverlay.classList.contains('visible'));
     }
 
     // Couleur du curseur basée sur la couleur dominante (surface) du gradient Floc'h de l'image

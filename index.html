@@ -5133,7 +5133,8 @@
     let cursorInWindow = true;
     function setCursorVisible() {
       customCursor.style.opacity = '';
-      customCursor.classList.toggle('visible', cursorInWindow);
+      const inScene = !clickGateActive && !landingActive && !introActive;
+      customCursor.classList.toggle('visible', cursorInWindow && inScene);
     }
 
     // Couleur du curseur basée sur la couleur dominante (surface) du gradient Floc'h de l'image
@@ -5165,7 +5166,7 @@
       cursorX = e.clientX;
       cursorY = e.clientY;
       if (!cursorRafId) {
-        if (!cursorInWindow || !customCursor.classList.contains('visible')) { cursorInWindow = true; setCursorVisible(); }
+        cursorInWindow = true; setCursorVisible();
         cursorRafId = requestAnimationFrame(() => {
           cursorRafId = 0;
           if (!cursorAllowed) {

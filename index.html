@@ -1670,7 +1670,7 @@
         powerPreference: "high-performance"
       });
       // Mobile: utiliser le pixelRatio natif (cap à 3 pour éviter excès sur certains écrans)
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // limité : fluidité au survol
       renderer.setSize(window.innerWidth, window.innerHeight);
       document.body.appendChild(renderer.domElement);
     } catch (error) {
@@ -1687,7 +1687,7 @@
     renderer.domElement.addEventListener('webglcontextrestored', () => {
       console.log('WebGL context restored — reinitializing renderer');
       // Reconfigurer le renderer après restauration
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // limité : fluidité au survol
       renderer.setSize(window.innerWidth, window.innerHeight);
       // Forcer un re-render
       if (particles && particles.geometry) {
@@ -4393,7 +4393,7 @@
         camera.fov = window.innerHeight > window.innerWidth ? 65 : 75;
       }
       camera.updateProjectionMatrix();
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // limité : fluidité au survol
       renderer.setSize(window.innerWidth, window.innerHeight);
       needsResizeRender = true;
     });
@@ -5166,7 +5166,7 @@
       cursorX = e.clientX;
       cursorY = e.clientY;
       if (!cursorRafId) {
-        cursorInWindow = true; setCursorVisible();
+        if (!cursorInWindow || !customCursor.classList.contains('visible')) { cursorInWindow = true; setCursorVisible(); }
         cursorRafId = requestAnimationFrame(() => {
           cursorRafId = 0;
           if (!cursorAllowed) {

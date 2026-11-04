@@ -4369,7 +4369,8 @@
         dragCurrentY += (dragTargetY - dragCurrentY) * DRAG_LERP;
       }
       if (Math.abs(dragCurrentX) > 0.001 || Math.abs(dragCurrentY) > 0.001) {
-        camera.lookAt(dragCurrentX, dragCurrentY, 0);
+        // Orientation angulaire constante, indépendante du zoom (ne se recentre pas au scroll)
+        camera.rotation.set(Math.atan(dragCurrentY / 25), -Math.atan(dragCurrentX / 25), 0);
         needsRender = true;
       } else if (Math.abs(dragCurrentX) > 0 || Math.abs(dragCurrentY) > 0) {
         dragCurrentX = 0;
@@ -4824,8 +4825,9 @@
       hoverLook = true;
       const nx = (e.clientX / window.innerWidth) * 2 - 1;
       const ny = (e.clientY / window.innerHeight) * 2 - 1;
-      dragTargetX = nx * DRAG_MAX_OFFSET;
-      dragTargetY = -ny * DRAG_MAX_OFFSET;
+      // Cadre d'orientation réduit (≈ ±4,8° horizontal, ±3,4° vertical)
+      dragTargetX = nx * DRAG_MAX_OFFSET * 0.6;
+      dragTargetY = -ny * DRAG_MAX_OFFSET * 0.42;
       dragVelocityX = 0; dragVelocityY = 0;
     });
     document.addEventListener('mouseleave', () => { hoverLook = false; });
